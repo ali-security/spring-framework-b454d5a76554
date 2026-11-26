@@ -24,6 +24,8 @@ import org.junit.jupiter.api.Test;
 
 import org.springframework.http.MediaType;
 import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.context.request.ServletWebRequest;
+import org.springframework.web.testfixture.servlet.MockHttpServletRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,6 +77,36 @@ class MappingContentNegotiationStrategyTests {
 
 		assertThat(mediaTypes).hasSize(1);
 		assertThat(mediaTypes.get(0).toString()).isEqualTo("application/xml");
+	}
+
+	@Test
+	void resolveMediaTypesViaFactoryDoesNotAddMapping() throws Exception {
+		Map<String, MediaType> mapping = Collections.singletonMap("json", MediaType.APPLICATION_JSON);
+		TestMappingContentNegotiationStrategy strategy = new TestMappingContentNegotiationStrategy("xml", mapping);
+
+		assertThat(strategy.resolveMediaTypes(null)).containsExactly(MediaType.APPLICATION_XML);
+		assertThat(strategy.getMediaTypes()).containsOnlyKeys("json");
+		assertThat(strategy.getAllFileExtensions()).containsExactly("json");
+		assertThat(strategy.resolveFileExtensions(MediaType.APPLICATION_XML)).isEmpty();
+	}
+
+	@Test
+	void resolveMediaTypesViaFactoryWithRequestKeysDoesNotAddMapping() throws Exception {
+		Map<String, MediaType> mapping = Collections.singletonMap("json", MediaType.APPLICATION_JSON);
+		ParameterContentNegotiationStrategy strategy = new ParameterContentNegotiationStrategy(mapping);
+		strategy.setUseRegisteredExtensionsOnly(false);
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		NativeWebRequest webRequest = new ServletWebRequest(request);
+
+		for (int i = 0; i < 100; i++) {
+			request.setParameter("format", "key" + i + ".xml");
+			assertThat(strategy.resolveMediaTypes(webRequest)).containsExactly(MediaType.APPLICATION_XML);
+			request.setParameter("format", (i % 2 == 0 ? "XmL" : "xMl"));
+			assertThat(strategy.resolveMediaTypes(webRequest)).containsExactly(MediaType.APPLICATION_XML);
+		}
+
+		assertThat(strategy.getMediaTypes()).containsOnlyKeys("json");
+		assertThat(strategy.getAllFileExtensions()).containsExactly("json");
 	}
 
 

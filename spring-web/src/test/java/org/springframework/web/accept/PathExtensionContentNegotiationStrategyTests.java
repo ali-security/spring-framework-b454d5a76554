@@ -71,6 +71,49 @@ class PathExtensionContentNegotiationStrategyTests {
 		assertThat(mediaTypes).containsExactly(new MediaType("application", "vnd.ms-excel"));
 	}
 
+	@Test
+	void resolveMediaTypesFromMediaTypeFactoryDoesNotAddMapping() throws Exception {
+		Map<String, MediaType> mapping = Collections.singletonMap("json", MediaType.APPLICATION_JSON);
+		this.strategy = new PathExtensionContentNegotiationStrategy(mapping);
+
+		for (String uri : new String[] {"test.xls", "test.XML", "test.a.html", "test.b.html", "test.htm"}) {
+			this.servletRequest.setRequestURI(uri);
+			assertThat(this.strategy.resolveMediaTypes(this.webRequest)).hasSize(1);
+		}
+
+		assertThat(this.strategy.getMediaTypes()).containsOnlyKeys("json");
+		assertThat(this.strategy.getAllFileExtensions()).containsExactly("json");
+	}
+
+	@Test
+	void resolveFileExtensionsFromMediaTypeFactory() {
+		assertThat(this.strategy.resolveFileExtensions(MediaType.TEXT_HTML)).containsExactly("html", "htm");
+		assertThat(this.strategy.resolveFileExtensions(MediaType.APPLICATION_XML)).containsExactly("xml", "xsl");
+		assertThat(this.strategy.resolveFileExtensions(new MediaType("application", "x-unknown"))).isEmpty();
+		assertThat(this.strategy.getMediaTypes()).isEmpty();
+		assertThat(this.strategy.getAllFileExtensions()).isEmpty();
+	}
+
+	@Test
+	void resolveFileExtensionsWithRegisteredMappings() {
+		Map<String, MediaType> mapping = Collections.singletonMap("htm", MediaType.APPLICATION_XHTML_XML);
+		this.strategy = new PathExtensionContentNegotiationStrategy(mapping);
+
+		assertThat(this.strategy.resolveFileExtensions(MediaType.APPLICATION_XHTML_XML))
+				.containsExactly("htm", "xhtml", "xht");
+		assertThat(this.strategy.resolveFileExtensions(MediaType.TEXT_HTML)).containsExactly("html");
+	}
+
+	@Test
+	void resolveFileExtensionsWithRegisteredExtensionsOnly() {
+		Map<String, MediaType> mapping = Collections.singletonMap("json", MediaType.APPLICATION_JSON);
+		this.strategy = new PathExtensionContentNegotiationStrategy(mapping);
+		this.strategy.setUseRegisteredExtensionsOnly(true);
+
+		assertThat(this.strategy.resolveFileExtensions(MediaType.APPLICATION_JSON)).containsExactly("json");
+		assertThat(this.strategy.resolveFileExtensions(MediaType.TEXT_HTML)).isEmpty();
+	}
+
 	@Test // SPR-8678
 	void getMediaTypeFilenameWithContextPath() throws Exception {
 		this.servletRequest.setContextPath("/project-1.0.0.M3");

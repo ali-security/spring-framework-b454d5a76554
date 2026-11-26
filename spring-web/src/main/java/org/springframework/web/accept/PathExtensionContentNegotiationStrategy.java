@@ -16,6 +16,15 @@
 
 package org.springframework.web.accept;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -47,6 +56,13 @@ import org.springframework.web.util.UrlPathHelper;
  */
 @Deprecated
 public class PathExtensionContentNegotiationStrategy extends AbstractMappingContentNegotiationStrategy {
+
+	private static final String MIME_TYPES_FILE_NAME = "/org/springframework/http/mime.types";
+
+	/** Reverse lookup of the file extensions that {@link MediaTypeFactory} resolves per media type. */
+	@Nullable
+	private static volatile Map<MediaType, List<String>> mediaTypeFactoryFileExtensions;
+
 
 	private UrlPathHelper urlPathHelper = new UrlPathHelper();
 
@@ -103,6 +119,33 @@ public class PathExtensionContentNegotiationStrategy extends AbstractMappingCont
 	}
 
 	/**
+	 * Return the file extensions registered for the given media type and, unless
+	 * {@link #setUseRegisteredExtensionsOnly useRegisteredExtensionsOnly} is set,
+	 * also the unregistered file extensions that {@link MediaTypeFactory} resolves
+	 * to it. Media types resolved from request paths via {@link MediaTypeFactory}
+	 * are not added to the registered mappings, so their file extensions are
+	 * derived from the fixed set of known file extensions instead.
+	 */
+	@Override
+	public List<String> resolveFileExtensions(MediaType mediaType) {
+		List<String> fileExtensions = super.resolveFileExtensions(mediaType);
+		if (isUseRegisteredExtensionsOnly()) {
+			return fileExtensions;
+		}
+		List<String> knownFileExtensions = getMediaTypeFactoryFileExtensions().get(mediaType);
+		if (knownFileExtensions == null) {
+			return fileExtensions;
+		}
+		List<String> result = new ArrayList<>(fileExtensions);
+		for (String extension : knownFileExtensions) {
+			if (!result.contains(extension) && lookupMediaType(extension) == null) {
+				result.add(extension);
+			}
+		}
+		return result;
+	}
+
+	/**
 	 * A public method exposing the knowledge of the path extension strategy to
 	 * resolve file extensions to a {@link MediaType} in this case for a given
 	 * {@link Resource}. The method first looks up any explicitly registered
@@ -124,6 +167,52 @@ public class PathExtensionContentNegotiationStrategy extends AbstractMappingCont
 			mediaType = MediaTypeFactory.getMediaType(filename).orElse(null);
 		}
 		return mediaType;
+	}
+
+
+	private static Map<MediaType, List<String>> getMediaTypeFactoryFileExtensions() {
+		Map<MediaType, List<String>> fileExtensions = mediaTypeFactoryFileExtensions;
+		if (fileExtensions == null) {
+			fileExtensions = parseMediaTypeFactoryFileExtensions();
+			mediaTypeFactoryFileExtensions = fileExtensions;
+		}
+		return fileExtensions;
+	}
+
+	/**
+	 * Build a reverse lookup from media type to file extensions, based on the
+	 * {@code mime.types} file used by {@link MediaTypeFactory}, keeping each
+	 * file extension only for the media type that {@link MediaTypeFactory}
+	 * resolves it to.
+	 */
+	private static Map<MediaType, List<String>> parseMediaTypeFactoryFileExtensions() {
+		InputStream is = MediaTypeFactory.class.getResourceAsStream(MIME_TYPES_FILE_NAME);
+		Assert.state(is != null, MIME_TYPES_FILE_NAME + " not found in classpath");
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.US_ASCII))) {
+			Map<MediaType, List<String>> result = new HashMap<>();
+			String line;
+			while ((line = reader.readLine()) != null) {
+				if (line.isEmpty() || line.charAt(0) == '#') {
+					continue;
+				}
+				String[] tokens = StringUtils.tokenizeToStringArray(line, " \t\n\r\f");
+				for (int i = 1; i < tokens.length; i++) {
+					String extension = tokens[i].toLowerCase(Locale.ROOT);
+					MediaType mediaType = MediaTypeFactory.getMediaType("file." + extension).orElse(null);
+					if (mediaType != null) {
+						List<String> extensions = result.computeIfAbsent(mediaType, key -> new ArrayList<>());
+						if (!extensions.contains(extension)) {
+							extensions.add(extension);
+						}
+					}
+				}
+			}
+			result.replaceAll((mediaType, extensions) -> Collections.unmodifiableList(extensions));
+			return Collections.unmodifiableMap(result);
+		}
+		catch (IOException ex) {
+			throw new IllegalStateException("Could not read " + MIME_TYPES_FILE_NAME, ex);
+		}
 	}
 
 }
